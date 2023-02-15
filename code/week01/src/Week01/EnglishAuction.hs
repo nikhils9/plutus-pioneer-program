@@ -14,7 +14,7 @@
 {-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TypeOperators              #-}
-
+-- Week01
 module Week01.EnglishAuction
     ( Auction (..)
     , StartParams (..), BidParams (..), CloseParams (..)
