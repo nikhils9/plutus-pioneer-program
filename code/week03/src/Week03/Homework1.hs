@@ -55,7 +55,7 @@ mkValidator (VestingDatum b1 b2 d) () c =
             then 
                 traceIfFalse "Not beneficiary" $ txSignedBy txInfo $ unPaymentPubKeyHash b1
             else
-                traceIfFalse "Not beneficiary" $ txSignedBy txInfo $ unPaymentPubKeyHash b2
+                traceIfFalse "Not beneficiary" (after d (txInfoValidRange txInfo) && (txSignedBy txInfo $ unPaymentPubKeyHash b2))
 
 data Vesting
 instance Scripts.ValidatorTypes Vesting where
@@ -96,9 +96,10 @@ give gp = do
         tx  = Constraints.mustPayToTheScript dat $ Ada.lovelaceValueOf $ gpAmount gp
     ledgerTx <- submitTxConstraints typedValidator tx
     void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
-    logInfo @P.String $ printf "made a gift of %d lovelace to %s with deadline %s"
+    logInfo @P.String $ printf "made a gift of %d lovelace to %s by %s with deadline %s"
         (gpAmount gp)
         (P.show $ gpBeneficiary gp)
+        (P.show $ pkh)
         (P.show $ gpDeadline gp)
 
 grab :: forall w s e. AsContractError e => Contract w s e ()
@@ -108,7 +109,7 @@ grab = do
     utxos  <- utxosAt scrAddress
     let utxos1 = Map.filter (isSuitable $ \dat -> beneficiary1 dat == pkh && now <= deadline dat) utxos
         utxos2 = Map.filter (isSuitable $ \dat -> beneficiary2 dat == pkh && now >  deadline dat) utxos
-    logInfo @P.String $ printf "found %d gift(s) to grab" (Map.size utxos1 P.+ Map.size utxos2)
+    logInfo @P.String $ printf "found %d gift(s) to grab for %s" (Map.size utxos1 P.+ Map.size utxos2) (P.show pkh)
     unless (Map.null utxos1) $ do
         let orefs   = fst <$> Map.toList utxos1
             lookups = Constraints.unspentOutputs utxos1 P.<>
