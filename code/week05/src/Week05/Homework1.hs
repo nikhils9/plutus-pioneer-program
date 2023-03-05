@@ -39,27 +39,44 @@ import           Wallet.Emulator.Wallet
 -- This policy should only allow minting (or burning) of tokens if the owner of the specified PaymentPubKeyHash
 -- has signed the transaction and if the specified deadline has not passed.
 mkPolicy :: PaymentPubKeyHash -> POSIXTime -> () -> ScriptContext -> Bool
-mkPolicy pkh deadline () ctx = True -- FIX ME!
+mkPolicy pkh deadline () ctx = 
+    traceIfFalse "You are not the owner of this token" isOwner &&
+    traceIfFalse "The deadline has passed" withinDeadline
+    where
+        info = scriptContextTxInfo ctx
+
+        withinDeadline = contains (to deadline) $ txInfoValidRange info
+
+        isOwner = txSignedBy info $ unPaymentPubKeyHash pkh
+
 
 policy :: PaymentPubKeyHash -> POSIXTime -> Scripts.MintingPolicy
-policy pkh deadline = undefined -- IMPLEMENT ME!
+policy pkh deadline = 
+    mkMintingPolicyScript $
+    $$(PlutusTx.compile [|| \p' d' -> Scripts.wrapMintingPolicy $ mkPolicy p' d' ||])
+    `PlutusTx.applyCode`
+    PlutusTx.liftCode pkh
+    `PlutusTx.applyCode`
+    PlutusTx.liftCode deadline
 
 curSymbol :: PaymentPubKeyHash -> POSIXTime -> CurrencySymbol
-curSymbol pkh deadline = undefined -- IMPLEMENT ME!
+curSymbol pkh deadline = scriptCurrencySymbol $ policy pkh deadline
 
 data MintParams = MintParams
     { mpTokenName :: !TokenName
     , mpDeadline  :: !POSIXTime
     , mpAmount    :: !Integer
+    , mpPaymentPubKeyHash :: !PaymentPubKeyHash
     } deriving (Generic, ToJSON, FromJSON, ToSchema)
 
 type SignedSchema = Endpoint "mint" MintParams
 
 mint :: MintParams -> Contract w SignedSchema Text ()
 mint mp = do
-    pkh <- Contract.ownPaymentPubKeyHash
     now <- Contract.currentTime
-    let deadline = mpDeadline mp
+    let 
+        deadline = mpDeadline mp
+        pkh = mpPaymentPubKeyHash mp
     if now > deadline
         then Contract.logError @String "deadline passed"
         else do
@@ -83,16 +100,44 @@ test :: IO ()
 test = runEmulatorTraceIO $ do
     let tn       = "ABC"
         deadline = slotToBeginPOSIXTime def 100
+        pkh = mockWalletPaymentPubKeyHash (knownWallet 1)
     h <- activateContractWallet (knownWallet 1) endpoints
     callEndpoint @"mint" h $ MintParams
         { mpTokenName = tn
         , mpDeadline  = deadline
         , mpAmount    = 555
+        , mpPaymentPubKeyHash = pkh
         }
     void $ Emulator.waitNSlots 110
     callEndpoint @"mint" h $ MintParams
         { mpTokenName = tn
         , mpDeadline  = deadline
         , mpAmount    = 555
+        , mpPaymentPubKeyHash = pkh
         }
+    void $ Emulator.waitNSlots 1
+
+test1 :: IO ()
+test1 = runEmulatorTraceIO $ do
+    let 
+        tn = "NFT"
+        deadline = slotToBeginPOSIXTime def 100
+        pkh = mockWalletPaymentPubKeyHash (knownWallet 1)
+
+    h1 <- activateContractWallet (knownWallet 1) endpoints
+    callEndpoint @"mint" h1 $ MintParams {
+        mpTokenName = tn,
+        mpDeadline = deadline,
+        mpAmount = 500,
+        mpPaymentPubKeyHash = pkh
+    }
+    void $ Emulator.waitNSlots 1
+
+    h2 <- activateContractWallet (knownWallet 2) endpoints
+    callEndpoint @"mint" h2 $ MintParams {
+        mpTokenName = tn,
+        mpDeadline = deadline,
+        mpAmount = 500,
+        mpPaymentPubKeyHash = pkh
+    }
     void $ Emulator.waitNSlots 1
